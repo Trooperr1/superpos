@@ -72,6 +72,17 @@ const AuthScreen = () => {
     }
   }, [pin]);
 
+  // Debug: Auto-login if only one user
+  const handleQuickLogin = async () => {
+    if (users.length === 1) {
+      const user = users[0];
+      if (user.pin === '1234') {
+        await db.users.update(user.id!, { lastLogin: new Date() });
+        login(user);
+      }
+    }
+  };
+
   return (
     <div className="flex h-screen items-center justify-center bg-gradient-to-br from-emerald-600 to-emerald-900 p-4">
       <div className="w-full max-w-md">
@@ -83,6 +94,14 @@ const AuthScreen = () => {
 
         {/* Login Card */}
         <div className="rounded-2xl bg-white p-8 shadow-2xl" dir="rtl">
+          {/* Quick Login Button */}
+          <button
+            onClick={handleQuickLogin}
+            className="w-full rounded-lg bg-emerald-600 py-4 px-6 text-xl font-bold text-white hover:bg-emerald-700 mb-4"
+          >
+            Click Here to Login (PIN: 1234)
+          </button>
+          <p className="text-center text-gray-600 mb-6">Users loaded: {users.length}</p>
           {/* User Selection */}
           {!selectedUser ? (
             <div>
