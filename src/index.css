@@ -1,21 +1,6 @@
-@import "tailwindcss";
-
-/* Custom theme for Kurdish POS */
-@theme {
-  --font-family: 'Segoe UI', Tahoma, Arial, sans-serif;
-
-  /* Custom colors for Kurdish market aesthetic */
-  --color-kurdish-green: #00843d;
-  --color-kurdish-red: #dc2626;
-  --color-kurdish-gold: #eab308;
-
-  /* Extend default palette */
-  --color-primary-50: #f0fdf4;
-  --color-primary-100: #dcfce7;
-  --color-primary-500: var(--color-kurdish-green);
-  --color-primary-600: #047857;
-  --color-primary-700: #065f46;
-}
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
 
 /* Base styles */
 * {
