@@ -17,10 +17,11 @@ const AuthScreen = () => {
 
   const loadUsers = async () => {
     try {
-      const allUsers = await db.users.where('isActive').equals(true).toArray();
-      setUsers(allUsers);
-      if (allUsers.length === 1) {
-        setSelectedUser(allUsers[0]);
+      const allUsers = await db.users.toArray();
+      const activeUsers = allUsers.filter(u => u.isActive);
+      setUsers(activeUsers);
+      if (activeUsers.length === 1) {
+        setSelectedUser(activeUsers[0]);
       }
     } catch (error) {
       console.error('Failed to load users:', error);
