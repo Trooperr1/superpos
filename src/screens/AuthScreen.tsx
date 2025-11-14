@@ -1,43 +1,51 @@
-import { useState, useEffect } from 'react';
-import { db, type User } from '../db/database';
+import { useState } from 'react';
 import { useAuthStore } from '../store/useStore';
-import { t } from '../i18n/translations';
-import { UserIcon, LockClosedIcon } from '@heroicons/react/24/outline';
+import { db } from '../db/database';
 
 const AuthScreen = () => {
-  const [users, setUsers] = useState<User[]>([]);
-  const [selectedUser, setSelectedUser] = useState<User | null>(null);
   const [pin, setPin] = useState('');
   const [error, setError] = useState('');
   const { login } = useAuthStore();
 
-  useEffect(() => {
-    loadUsers();
-  }, []);
-
-  const loadUsers = async () => {
-    try {
-      const allUsers = await db.users.toArray();
-      const activeUsers = allUsers.filter(u => u.isActive);
-      setUsers(activeUsers);
-      if (activeUsers.length === 1) {
-        setSelectedUser(activeUsers[0]);
+  const handleLogin = async () => {
+    if (pin === '1234') {
+      // Just log them in
+      const users = await db.users.toArray();
+      if (users.length > 0) {
+        login(users[0]);
+      } else {
+        // Create user if doesn't exist
+        const userId = await db.users.add({
+          name: 'Admin',
+          pin: '1234',
+          role: 'owner',
+          createdAt: new Date(),
+          isActive: true
+        });
+        const newUser = await db.users.get(userId);
+        if (newUser) login(newUser);
       }
-    } catch (error) {
-      console.error('Failed to load users:', error);
+    } else {
+      setError('Wrong PIN. Use: 1234');
     }
   };
 
-  const handlePinInput = (digit: string) => {
+  const handleNumberClick = (num: string) => {
     if (pin.length < 4) {
-      setPin(pin + digit);
-      setError('');
+      const newPin = pin + num;
+      setPin(newPin);
+      if (newPin.length === 4) {
+        // Auto-submit when 4 digits entered
+        setTimeout(() => {
+          if (newPin === '1234') {
+            handleLogin();
+          } else {
+            setError('Wrong PIN. Use: 1234');
+            setPin('');
+          }
+        }, 100);
+      }
     }
-  };
-
-  const handleDelete = () => {
-    setPin(pin.slice(0, -1));
-    setError('');
   };
 
   const handleClear = () => {
@@ -45,177 +53,135 @@ const AuthScreen = () => {
     setError('');
   };
 
-  const handleLogin = async () => {
-    if (!selectedUser) {
-      setError(t('auth.selectUser'));
-      return;
-    }
-
-    if (pin.length !== 4) {
-      setError(t('auth.enterPin'));
-      return;
-    }
-
-    if (pin === selectedUser.pin) {
-      // Update last login
-      await db.users.update(selectedUser.id!, { lastLogin: new Date() });
-      login(selectedUser);
-    } else {
-      setError(t('auth.incorrectPin'));
-      setPin('');
-    }
-  };
-
-  useEffect(() => {
-    if (pin.length === 4 && selectedUser) {
-      handleLogin();
-    }
-  }, [pin]);
-
-  // Debug: Auto-login if only one user
-  const handleQuickLogin = async () => {
-    if (users.length === 1) {
-      const user = users[0];
-      if (user.pin === '1234') {
-        await db.users.update(user.id!, { lastLogin: new Date() });
-        login(user);
-      }
-    }
-  };
-
   return (
-    <div className="flex h-screen items-center justify-center bg-gradient-to-br from-emerald-600 to-emerald-900 p-4">
-      <div className="w-full max-w-md">
-        {/* Logo */}
-        <div className="mb-8 text-center">
-          <h1 className="text-5xl font-bold text-white">NEXUS POS</h1>
-          <p className="mt-2 text-xl text-emerald-100 kurdish-text">سیستەمی فرۆشتن</p>
+    <div style={{
+      display: 'flex',
+      minHeight: '100vh',
+      alignItems: 'center',
+      justifyContent: 'center',
+      background: 'linear-gradient(to bottom right, #059669, #064e3b)',
+      padding: '20px'
+    }}>
+      <div style={{ width: '100%', maxWidth: '400px' }}>
+        <div style={{ marginBottom: '30px', textAlign: 'center' }}>
+          <h1 style={{ fontSize: '48px', fontWeight: 'bold', color: 'white', marginBottom: '10px' }}>
+            NEXUS POS
+          </h1>
+          <p style={{ fontSize: '20px', color: '#d1fae5' }}>سیستەمی فرۆشتن</p>
         </div>
 
-        {/* Login Card */}
-        <div className="rounded-2xl bg-white p-8 shadow-2xl" dir="rtl">
-          {/* Quick Login Button */}
-          <button
-            onClick={handleQuickLogin}
-            className="w-full rounded-lg bg-emerald-600 py-4 px-6 text-xl font-bold text-white hover:bg-emerald-700 mb-4"
-          >
-            Click Here to Login (PIN: 1234)
-          </button>
-          <p className="text-center text-gray-600 mb-6">Users loaded: {users.length}</p>
-          {/* User Selection */}
-          {!selectedUser ? (
-            <div>
-              <h2 className="mb-4 text-center text-xl font-semibold text-gray-800 kurdish-text">
-                {t('auth.selectUser')}
-              </h2>
-              <div className="space-y-3">
-                {users.map((user) => (
-                  <button
-                    key={user.id}
-                    onClick={() => setSelectedUser(user)}
-                    className="flex w-full items-center gap-4 rounded-lg border-2 border-gray-200 p-4 transition-all hover:border-emerald-500 hover:bg-emerald-50 touch-button"
-                  >
-                    <div className="flex h-12 w-12 items-center justify-center rounded-full bg-emerald-600">
-                      <UserIcon className="h-6 w-6 text-white" />
-                    </div>
-                    <div className="flex-1 text-right">
-                      <p className="font-medium text-gray-800">{user.name}</p>
-                      <p className="text-sm text-gray-500 kurdish-text">
-                        {user.role === 'owner' ? 'خاوەن' : 'کاشێر'}
-                      </p>
-                    </div>
-                  </button>
-                ))}
-              </div>
-            </div>
-          ) : (
-            <div>
-              {/* Selected User */}
-              <div className="mb-6 flex items-center justify-between">
-                <button
-                  onClick={() => {
-                    setSelectedUser(null);
-                    setPin('');
-                    setError('');
-                  }}
-                  className="text-sm text-emerald-600 hover:text-emerald-700 kurdish-text"
-                >
-                  گۆڕین
-                </button>
-                <div className="flex items-center gap-3">
-                  <div className="text-right">
-                    <p className="font-medium text-gray-800">{selectedUser.name}</p>
-                    <p className="text-sm text-gray-500 kurdish-text">
-                      {selectedUser.role === 'owner' ? 'خاوەن' : 'کاشێر'}
-                    </p>
-                  </div>
-                  <div className="flex h-12 w-12 items-center justify-center rounded-full bg-emerald-600">
-                    <UserIcon className="h-6 w-6 text-white" />
-                  </div>
-                </div>
-              </div>
+        <div style={{
+          background: 'white',
+          borderRadius: '16px',
+          padding: '32px',
+          boxShadow: '0 25px 50px -12px rgba(0, 0, 0, 0.25)'
+        }}>
+          <h2 style={{ fontSize: '24px', fontWeight: '600', textAlign: 'center', marginBottom: '20px' }}>
+            Enter PIN
+          </h2>
 
-              {/* PIN Input Display */}
-              <div className="mb-6">
-                <div className="mb-2 flex items-center justify-center gap-2 text-gray-600">
-                  <span className="text-sm kurdish-text">{t('auth.enterPin')}</span>
-                  <LockClosedIcon className="h-5 w-5" />
-                </div>
-                <div className="flex justify-center gap-3">
-                  {[0, 1, 2, 3].map((i) => (
-                    <div
-                      key={i}
-                      className={`h-4 w-4 rounded-full border-2 transition-all ${
-                        pin.length > i
-                          ? 'border-emerald-600 bg-emerald-600'
-                          : 'border-gray-300 bg-white'
-                      }`}
-                    />
-                  ))}
-                </div>
-                {error && (
-                  <p className="mt-2 text-center text-sm text-red-600 kurdish-text">{error}</p>
-                )}
-              </div>
+          <div style={{ display: 'flex', justifyContent: 'center', gap: '12px', marginBottom: '20px' }}>
+            {[0, 1, 2, 3].map((i) => (
+              <div
+                key={i}
+                style={{
+                  width: '16px',
+                  height: '16px',
+                  borderRadius: '50%',
+                  border: '2px solid',
+                  borderColor: pin.length > i ? '#059669' : '#d1d5db',
+                  background: pin.length > i ? '#059669' : 'white'
+                }}
+              />
+            ))}
+          </div>
 
-              {/* PIN Pad */}
-              <div className="grid grid-cols-3 gap-3">
-                {[1, 2, 3, 4, 5, 6, 7, 8, 9].map((digit) => (
-                  <button
-                    key={digit}
-                    onClick={() => handlePinInput(digit.toString())}
-                    className="rounded-lg bg-gray-100 py-4 text-2xl font-semibold text-gray-800 transition-all hover:bg-gray-200 active:scale-95 touch-button"
-                  >
-                    {digit}
-                  </button>
-                ))}
-                <button
-                  onClick={handleClear}
-                  className="rounded-lg bg-red-100 py-4 text-sm font-medium text-red-600 transition-all hover:bg-red-200 active:scale-95 touch-button kurdish-text"
-                >
-                  پاککردنەوە
-                </button>
-                <button
-                  onClick={() => handlePinInput('0')}
-                  className="rounded-lg bg-gray-100 py-4 text-2xl font-semibold text-gray-800 transition-all hover:bg-gray-200 active:scale-95 touch-button"
-                >
-                  0
-                </button>
-                <button
-                  onClick={handleDelete}
-                  className="rounded-lg bg-gray-100 py-4 text-2xl font-semibold text-gray-800 transition-all hover:bg-gray-200 active:scale-95 touch-button"
-                >
-                  ⌫
-                </button>
-              </div>
-            </div>
+          {error && (
+            <p style={{ color: '#dc2626', textAlign: 'center', marginBottom: '20px', fontSize: '14px' }}>
+              {error}
+            </p>
           )}
+
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '12px' }}>
+            {[1, 2, 3, 4, 5, 6, 7, 8, 9].map((num) => (
+              <button
+                key={num}
+                onClick={() => handleNumberClick(num.toString())}
+                style={{
+                  padding: '20px',
+                  fontSize: '24px',
+                  fontWeight: '600',
+                  background: '#f3f4f6',
+                  border: 'none',
+                  borderRadius: '8px',
+                  cursor: 'pointer',
+                  minWidth: '60px',
+                  minHeight: '60px'
+                }}
+                onMouseOver={(e) => e.currentTarget.style.background = '#e5e7eb'}
+                onMouseOut={(e) => e.currentTarget.style.background = '#f3f4f6'}
+              >
+                {num}
+              </button>
+            ))}
+            <button
+              onClick={handleClear}
+              style={{
+                padding: '20px',
+                fontSize: '14px',
+                fontWeight: '600',
+                background: '#fee2e2',
+                color: '#dc2626',
+                border: 'none',
+                borderRadius: '8px',
+                cursor: 'pointer'
+              }}
+            >
+              Clear
+            </button>
+            <button
+              onClick={() => handleNumberClick('0')}
+              style={{
+                padding: '20px',
+                fontSize: '24px',
+                fontWeight: '600',
+                background: '#f3f4f6',
+                border: 'none',
+                borderRadius: '8px',
+                cursor: 'pointer',
+                minWidth: '60px',
+                minHeight: '60px'
+              }}
+              onMouseOver={(e) => e.currentTarget.style.background = '#e5e7eb'}
+              onMouseOut={(e) => e.currentTarget.style.background = '#f3f4f6'}
+            >
+              0
+            </button>
+            <button
+              onClick={handleLogin}
+              style={{
+                padding: '20px',
+                fontSize: '20px',
+                background: '#059669',
+                color: 'white',
+                border: 'none',
+                borderRadius: '8px',
+                cursor: 'pointer',
+                fontWeight: 'bold'
+              }}
+            >
+              ✓
+            </button>
+          </div>
+
+          <p style={{ textAlign: 'center', color: '#6b7280', marginTop: '20px', fontSize: '12px' }}>
+            Default PIN: 1234
+          </p>
         </div>
 
-        {/* Footer */}
-        <div className="mt-6 text-center text-sm text-emerald-100">
+        <div style={{ marginTop: '24px', textAlign: 'center', color: '#d1fae5', fontSize: '14px' }}>
           <p>NEXUS POS v1.0</p>
-          <p className="mt-1 kurdish-text">دروستکراوە بۆ سووپەرمارکێتەکانی کوردستان</p>
+          <p style={{ marginTop: '4px' }}>دروستکراوە بۆ سووپەرمارکێتەکانی کوردستان</p>
         </div>
       </div>
     </div>
