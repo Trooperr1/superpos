@@ -1,0 +1,481 @@
+import { useState, useEffect } from 'react';
+import { db, type Product, generateTransactionId } from '../db/database';
+import { useCartStore, useAuthStore, useSettingsStore, useUIStore } from '../store/useStore';
+import { t, formatCurrency } from '../i18n/translations';
+import {
+  MagnifyingGlassIcon,
+  TrashIcon,
+  PlusIcon,
+  MinusIcon,
+  XMarkIcon,
+  BanknotesIcon,
+  CreditCardIcon,
+} from '@heroicons/react/24/outline';
+
+const QuickSale = () => {
+  const [products, setProducts] = useState<Product[]>([]);
+  const [searchQuery, setSearchQuery] = useState('');
+  const [filteredProducts, setFilteredProducts] = useState<Product[]>([]);
+  const [quickProducts, setQuickProducts] = useState<Product[]>([]);
+  const [showPaymentModal, setShowPaymentModal] = useState(false);
+  const [paymentMethod, setPaymentMethod] = useState<'cash' | 'card' | 'mixed'>('cash');
+  const [cashAmount, setCashAmount] = useState('');
+  const [cardAmount, setCardAmount] = useState('');
+
+  const cart = useCartStore();
+  const { currentUser } = useAuthStore();
+  const { settings } = useSettingsStore();
+  const { showNotification } = useUIStore();
+
+  const taxRate = settings?.taxRate || 0;
+
+  useEffect(() => {
+    loadProducts();
+  }, []);
+
+  useEffect(() => {
+    // Filter products based on search
+    if (searchQuery.trim()) {
+      const query = searchQuery.toLowerCase();
+      const filtered = products.filter(
+        (p) =>
+          p.name.toLowerCase().includes(query) ||
+          p.nameKurdish.toLowerCase().includes(query) ||
+          p.barcode?.includes(query)
+      );
+      setFilteredProducts(filtered.slice(0, 10)); // Limit to 10 results
+    } else {
+      setFilteredProducts([]);
+    }
+  }, [searchQuery, products]);
+
+  const loadProducts = async () => {
+    try {
+      const allProducts = await db.products.toArray();
+      setProducts(allProducts);
+
+      // Get top 20 products for quick access (by stock or manually marked)
+      const quick = allProducts.slice(0, 20);
+      setQuickProducts(quick);
+    } catch (error) {
+      console.error('Failed to load products:', error);
+    }
+  };
+
+  const handleAddToCart = (product: Product) => {
+    if (product.stock <= 0) {
+      showNotification('error', t('sale.outOfStock'));
+      return;
+    }
+
+    cart.addItem(product, 1);
+    setSearchQuery('');
+    setFilteredProducts([]);
+  };
+
+  const handleUpdateQuantity = (productId: number, newQuantity: number) => {
+    const item = cart.items.find((i) => i.productId === productId);
+    if (item && newQuantity > item.product.stock) {
+      showNotification('error', t('sale.insufficientStock'));
+      return;
+    }
+    cart.updateQuantity(productId, newQuantity);
+  };
+
+  const handleCheckout = () => {
+    if (cart.items.length === 0) {
+      showNotification('warning', t('sale.emptyCart'));
+      return;
+    }
+    setShowPaymentModal(true);
+  };
+
+  const handleCompleteSale = async () => {
+    try {
+      const subtotal = cart.getSubtotal();
+      const tax = cart.getTax(taxRate);
+      const total = cart.getTotal(taxRate);
+
+      let cashPaid = 0;
+      let cardPaid = 0;
+
+      if (paymentMethod === 'cash') {
+        cashPaid = parseFloat(cashAmount) || 0;
+        if (cashPaid < total) {
+          showNotification('error', 'بڕی پارەی دراو کەمە');
+          return;
+        }
+      } else if (paymentMethod === 'card') {
+        cardPaid = total;
+      } else if (paymentMethod === 'mixed') {
+        cashPaid = parseFloat(cashAmount) || 0;
+        cardPaid = parseFloat(cardAmount) || 0;
+        if (cashPaid + cardPaid < total) {
+          showNotification('error', 'بڕی پارەی دراو کەمە');
+          return;
+        }
+      }
+
+      const changeGiven = paymentMethod === 'cash' ? cashPaid - total : 0;
+
+      // Create sale record
+      const saleId = await db.sales.add({
+        transactionId: generateTransactionId(),
+        items: cart.items.map((item) => ({
+          productId: item.productId,
+          productName: item.productName,
+          quantity: item.quantity,
+          price: item.price,
+          subtotal: item.subtotal,
+        })),
+        subtotal,
+        discount: cart.discount,
+        discountType: cart.discountType,
+        tax,
+        total,
+        paymentMethod,
+        cashAmount: cashPaid || undefined,
+        cardAmount: cardPaid || undefined,
+        changeGiven: changeGiven > 0 ? changeGiven : undefined,
+        userId: currentUser?.id,
+        createdAt: new Date(),
+      });
+
+      // Update product stock
+      for (const item of cart.items) {
+        await db.products.update(item.productId, {
+          stock: item.product.stock - item.quantity,
+          updatedAt: new Date(),
+        });
+      }
+
+      // Add cash transaction
+      if (paymentMethod === 'cash' || paymentMethod === 'mixed') {
+        await db.cashTransactions.add({
+          type: 'sale',
+          amount: cashPaid,
+          saleId,
+          userId: currentUser?.id,
+          createdAt: new Date(),
+        });
+      }
+
+      showNotification('success', t('success.saleCompleted'));
+
+      // Clear cart and close modal
+      cart.clearCart();
+      setShowPaymentModal(false);
+      setCashAmount('');
+      setCardAmount('');
+
+      // Reload products to update stock
+      loadProducts();
+    } catch (error) {
+      console.error('Failed to complete sale:', error);
+      showNotification('error', t('errors.unknownError'));
+    }
+  };
+
+  const subtotal = cart.getSubtotal();
+  const discountAmount = cart.getDiscountAmount();
+  const tax = cart.getTax(taxRate);
+  const total = cart.getTotal(taxRate);
+
+  return (
+    <div className="flex h-full gap-4" dir="rtl">
+      {/* Left Side - Products */}
+      <div className="flex-1 flex flex-col space-y-4">
+        {/* Search Bar */}
+        <div className="relative">
+          <input
+            type="text"
+            value={searchQuery}
+            onChange={(e) => setSearchQuery(e.target.value)}
+            placeholder={t('sale.searchProduct')}
+            className="w-full rounded-lg border-2 border-gray-300 py-3 pr-12 pl-4 text-lg focus:border-emerald-500 focus:outline-none kurdish-text"
+          />
+          <MagnifyingGlassIcon className="absolute right-3 top-1/2 h-6 w-6 -translate-y-1/2 text-gray-400" />
+
+          {/* Search Results Dropdown */}
+          {filteredProducts.length > 0 && (
+            <div className="absolute z-10 mt-2 max-h-96 w-full overflow-auto rounded-lg border border-gray-200 bg-white shadow-lg">
+              {filteredProducts.map((product) => (
+                <button
+                  key={product.id}
+                  onClick={() => handleAddToCart(product)}
+                  className="flex w-full items-center justify-between border-b border-gray-100 p-4 text-right hover:bg-emerald-50 touch-button"
+                >
+                  <div className="flex-1">
+                    <p className="font-medium text-gray-800 kurdish-text">
+                      {product.nameKurdish || product.name}
+                    </p>
+                    <p className="text-sm text-gray-500">
+                      {formatCurrency(product.price)} • {t('inventory.currentStock')}: {product.stock}
+                    </p>
+                  </div>
+                  {product.stock <= 0 && (
+                    <span className="rounded-full bg-red-100 px-3 py-1 text-xs text-red-600 kurdish-text">
+                      {t('sale.outOfStock')}
+                    </span>
+                  )}
+                  {product.stock > 0 && product.stock <= product.reorderLevel && (
+                    <span className="rounded-full bg-yellow-100 px-3 py-1 text-xs text-yellow-600 kurdish-text">
+                      {t('sale.lowStock')}
+                    </span>
+                  )}
+                </button>
+              ))}
+            </div>
+          )}
+        </div>
+
+        {/* Quick Products Grid */}
+        <div className="flex-1 overflow-auto">
+          <h3 className="mb-3 text-lg font-semibold text-gray-800 kurdish-text">
+            {t('sale.quickProducts')}
+          </h3>
+          <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-4">
+            {quickProducts.map((product) => (
+              <button
+                key={product.id}
+                onClick={() => handleAddToCart(product)}
+                disabled={product.stock <= 0}
+                className={`rounded-lg border-2 p-4 text-center transition-all touch-button ${
+                  product.stock <= 0
+                    ? 'border-gray-200 bg-gray-50 text-gray-400 cursor-not-allowed'
+                    : 'border-emerald-200 bg-white hover:border-emerald-500 hover:bg-emerald-50'
+                }`}
+              >
+                <p className="font-medium text-gray-800 kurdish-text line-clamp-2">
+                  {product.nameKurdish || product.name}
+                </p>
+                <p className="mt-2 text-lg font-bold text-emerald-600">
+                  {formatCurrency(product.price)}
+                </p>
+                <p className="mt-1 text-xs text-gray-500">
+                  {t('inventory.currentStock')}: {product.stock}
+                </p>
+              </button>
+            ))}
+          </div>
+        </div>
+      </div>
+
+      {/* Right Side - Cart */}
+      <div className="w-96 flex flex-col rounded-lg bg-white shadow-lg">
+        <div className="border-b border-gray-200 p-4">
+          <h2 className="text-xl font-bold text-gray-800 kurdish-text">{t('sale.cart')}</h2>
+          <p className="text-sm text-gray-600 kurdish-text">
+            {cart.items.length} {t('sale.itemCount')}
+          </p>
+        </div>
+
+        {/* Cart Items */}
+        <div className="flex-1 overflow-auto p-4">
+          {cart.items.length === 0 ? (
+            <div className="flex h-full items-center justify-center text-gray-400">
+              <p className="kurdish-text">{t('sale.emptyCart')}</p>
+            </div>
+          ) : (
+            <div className="space-y-3">
+              {cart.items.map((item) => (
+                <div key={item.productId} className="rounded-lg border border-gray-200 p-3">
+                  <div className="flex items-start justify-between">
+                    <div className="flex-1">
+                      <p className="font-medium text-gray-800 kurdish-text">
+                        {item.productName}
+                      </p>
+                      <p className="text-sm text-gray-600">
+                        {formatCurrency(item.price)} × {item.quantity}
+                      </p>
+                    </div>
+                    <button
+                      onClick={() => cart.removeItem(item.productId)}
+                      className="text-red-600 hover:text-red-700 touch-button"
+                    >
+                      <TrashIcon className="h-5 w-5" />
+                    </button>
+                  </div>
+                  <div className="mt-2 flex items-center justify-between">
+                    <div className="flex items-center gap-2">
+                      <button
+                        onClick={() => handleUpdateQuantity(item.productId, item.quantity - 1)}
+                        className="flex h-8 w-8 items-center justify-center rounded-lg bg-gray-100 hover:bg-gray-200 touch-button"
+                      >
+                        <MinusIcon className="h-4 w-4" />
+                      </button>
+                      <span className="w-8 text-center font-medium">{item.quantity}</span>
+                      <button
+                        onClick={() => handleUpdateQuantity(item.productId, item.quantity + 1)}
+                        className="flex h-8 w-8 items-center justify-center rounded-lg bg-gray-100 hover:bg-gray-200 touch-button"
+                      >
+                        <PlusIcon className="h-4 w-4" />
+                      </button>
+                    </div>
+                    <p className="text-lg font-bold text-emerald-600">
+                      {formatCurrency(item.subtotal)}
+                    </p>
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+
+        {/* Cart Summary */}
+        {cart.items.length > 0 && (
+          <div className="border-t border-gray-200 p-4 space-y-3">
+            <div className="flex justify-between text-sm">
+              <span className="text-gray-600 kurdish-text">{t('common.subtotal')}</span>
+              <span className="font-medium">{formatCurrency(subtotal)}</span>
+            </div>
+            {discountAmount > 0 && (
+              <div className="flex justify-between text-sm text-red-600">
+                <span className="kurdish-text">{t('common.discount')}</span>
+                <span>-{formatCurrency(discountAmount)}</span>
+              </div>
+            )}
+            {tax > 0 && (
+              <div className="flex justify-between text-sm">
+                <span className="text-gray-600 kurdish-text">{t('common.tax')}</span>
+                <span className="font-medium">{formatCurrency(tax)}</span>
+              </div>
+            )}
+            <div className="flex justify-between border-t border-gray-200 pt-3 text-lg font-bold">
+              <span className="kurdish-text">{t('common.total')}</span>
+              <span className="text-emerald-600">{formatCurrency(total)}</span>
+            </div>
+
+            {/* Action Buttons */}
+            <div className="space-y-2">
+              <button
+                onClick={handleCheckout}
+                className="w-full rounded-lg bg-emerald-600 py-3 font-semibold text-white hover:bg-emerald-700 touch-button kurdish-text"
+              >
+                {t('sale.completeSale')}
+              </button>
+              <button
+                onClick={() => cart.clearCart()}
+                className="w-full rounded-lg border-2 border-red-600 py-3 font-semibold text-red-600 hover:bg-red-50 touch-button kurdish-text"
+              >
+                {t('sale.clearCart')}
+              </button>
+            </div>
+          </div>
+        )}
+      </div>
+
+      {/* Payment Modal */}
+      {showPaymentModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
+          <div className="w-full max-w-md rounded-lg bg-white p-6" dir="rtl">
+            <div className="mb-4 flex items-center justify-between">
+              <h3 className="text-xl font-bold text-gray-800 kurdish-text">
+                {t('sale.paymentMethod')}
+              </h3>
+              <button
+                onClick={() => setShowPaymentModal(false)}
+                className="text-gray-600 hover:text-gray-800 touch-button"
+              >
+                <XMarkIcon className="h-6 w-6" />
+              </button>
+            </div>
+
+            {/* Payment Method Selection */}
+            <div className="mb-4 grid grid-cols-3 gap-2">
+              <button
+                onClick={() => setPaymentMethod('cash')}
+                className={`rounded-lg border-2 py-3 font-medium transition-all touch-button kurdish-text ${
+                  paymentMethod === 'cash'
+                    ? 'border-emerald-600 bg-emerald-50 text-emerald-600'
+                    : 'border-gray-300 text-gray-600'
+                }`}
+              >
+                <BanknotesIcon className="mx-auto h-6 w-6 mb-1" />
+                {t('sale.cash')}
+              </button>
+              <button
+                onClick={() => setPaymentMethod('card')}
+                className={`rounded-lg border-2 py-3 font-medium transition-all touch-button kurdish-text ${
+                  paymentMethod === 'card'
+                    ? 'border-emerald-600 bg-emerald-50 text-emerald-600'
+                    : 'border-gray-300 text-gray-600'
+                }`}
+              >
+                <CreditCardIcon className="mx-auto h-6 w-6 mb-1" />
+                {t('sale.card')}
+              </button>
+              <button
+                onClick={() => setPaymentMethod('mixed')}
+                className={`rounded-lg border-2 py-3 font-medium transition-all touch-button kurdish-text ${
+                  paymentMethod === 'mixed'
+                    ? 'border-emerald-600 bg-emerald-50 text-emerald-600'
+                    : 'border-gray-300 text-gray-600'
+                }`}
+              >
+                {t('sale.mixed')}
+              </button>
+            </div>
+
+            {/* Amount Inputs */}
+            <div className="mb-4 space-y-3">
+              <div className="rounded-lg bg-gray-50 p-3">
+                <p className="text-sm text-gray-600 kurdish-text">{t('common.total')}</p>
+                <p className="text-2xl font-bold text-emerald-600">{formatCurrency(total)}</p>
+              </div>
+
+              {(paymentMethod === 'cash' || paymentMethod === 'mixed') && (
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 kurdish-text mb-1">
+                    {t('sale.amountPaid')} ({t('sale.cash')})
+                  </label>
+                  <input
+                    type="number"
+                    value={cashAmount}
+                    onChange={(e) => setCashAmount(e.target.value)}
+                    placeholder="0"
+                    className="w-full rounded-lg border-2 border-gray-300 py-2 px-4 text-lg focus:border-emerald-500 focus:outline-none"
+                  />
+                </div>
+              )}
+
+              {paymentMethod === 'mixed' && (
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 kurdish-text mb-1">
+                    {t('sale.amountPaid')} ({t('sale.card')})
+                  </label>
+                  <input
+                    type="number"
+                    value={cardAmount}
+                    onChange={(e) => setCardAmount(e.target.value)}
+                    placeholder="0"
+                    className="w-full rounded-lg border-2 border-gray-300 py-2 px-4 text-lg focus:border-emerald-500 focus:outline-none"
+                  />
+                </div>
+              )}
+
+              {paymentMethod === 'cash' && cashAmount && parseFloat(cashAmount) >= total && (
+                <div className="rounded-lg bg-emerald-50 p-3">
+                  <p className="text-sm text-gray-600 kurdish-text">{t('sale.change')}</p>
+                  <p className="text-xl font-bold text-emerald-600">
+                    {formatCurrency(parseFloat(cashAmount) - total)}
+                  </p>
+                </div>
+              )}
+            </div>
+
+            {/* Confirm Button */}
+            <button
+              onClick={handleCompleteSale}
+              className="w-full rounded-lg bg-emerald-600 py-3 font-semibold text-white hover:bg-emerald-700 touch-button kurdish-text"
+            >
+              {t('sale.completeSale')}
+            </button>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+};
+
+export default QuickSale;
