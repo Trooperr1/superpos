@@ -17,7 +17,7 @@ const AuthScreen = () => {
 
   const loadUsers = async () => {
     try {
-      const allUsers = await db.users.where('isActive').equals(1).toArray();
+      const allUsers = await db.users.where('isActive').equals(true).toArray();
       setUsers(allUsers);
       if (allUsers.length === 1) {
         setSelectedUser(allUsers[0]);
