@@ -1,0 +1,187 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>NEXUS POS - Diagnostics</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            max-width: 800px;
+            margin: 50px auto;
+            padding: 20px;
+            background: #f5f5f5;
+        }
+        .status {
+            padding: 15px;
+            margin: 10px 0;
+            border-radius: 5px;
+            font-weight: bold;
+        }
+        .success {
+            background: #d4edda;
+            color: #155724;
+            border: 1px solid #c3e6cb;
+        }
+        .error {
+            background: #f8d7da;
+            color: #721c24;
+            border: 1px solid #f5c6cb;
+        }
+        .info {
+            background: #d1ecf1;
+            color: #0c5460;
+            border: 1px solid #bee5eb;
+        }
+        button {
+            background: #00843d;
+            color: white;
+            padding: 10px 20px;
+            border: none;
+            border-radius: 5px;
+            cursor: pointer;
+            font-size: 16px;
+            margin: 5px;
+        }
+        button:hover {
+            background: #065f46;
+        }
+        pre {
+            background: #fff;
+            padding: 15px;
+            border-radius: 5px;
+            overflow-x: auto;
+            border: 1px solid #ddd;
+        }
+        .kurdish {
+            font-size: 24px;
+            text-align: center;
+            color: #00843d;
+            margin: 20px 0;
+        }
+    </style>
+</head>
+<body>
+    <h1>🔍 NEXUS POS Diagnostics</h1>
+    <div class="kurdish">سیستەمی فرۆشتن - تاقیکردنەوە</div>
+
+    <div id="status">
+        <div class="status info">⏳ Running diagnostics...</div>
+    </div>
+
+    <div>
+        <h3>Quick Actions:</h3>
+        <button onclick="window.location.href='http://localhost:3000'">🚀 Open NEXUS POS</button>
+        <button onclick="location.reload()">🔄 Refresh Diagnostics</button>
+        <button onclick="testIndexedDB()">💾 Test IndexedDB</button>
+    </div>
+
+    <h3>Test Results:</h3>
+    <div id="results"></div>
+
+    <script>
+        const results = document.getElementById('results');
+        const status = document.getElementById('status');
+
+        function addResult(title, success, message) {
+            const div = document.createElement('div');
+            div.className = `status ${success ? 'success' : 'error'}`;
+            div.innerHTML = `<strong>${success ? '✅' : '❌'} ${title}:</strong> ${message}`;
+            results.appendChild(div);
+        }
+
+        async function runDiagnostics() {
+            status.innerHTML = '<div class="status info">⏳ Running tests...</div>';
+            results.innerHTML = '';
+
+            // Test 1: Check if server is running
+            try {
+                const response = await fetch('http://localhost:3000');
+                if (response.ok) {
+                    addResult('Server Status', true, 'Vite dev server is running at http://localhost:3000');
+                } else {
+                    addResult('Server Status', false, `Server responded with status ${response.status}`);
+                }
+            } catch (e) {
+                addResult('Server Status', false, 'Cannot connect to server. Make sure "npm run dev" is running.');
+            }
+
+            // Test 2: Check IndexedDB support
+            if ('indexedDB' in window) {
+                addResult('IndexedDB Support', true, 'Browser supports IndexedDB (required for offline storage)');
+            } else {
+                addResult('IndexedDB Support', false, 'Browser does NOT support IndexedDB! App will not work.');
+            }
+
+            // Test 3: Check local storage
+            try {
+                localStorage.setItem('test', 'value');
+                localStorage.removeItem('test');
+                addResult('LocalStorage', true, 'LocalStorage is available');
+            } catch (e) {
+                addResult('LocalStorage', false, 'LocalStorage is blocked or unavailable');
+            }
+
+            // Test 4: Check if modules can be loaded
+            try {
+                const mainResponse = await fetch('http://localhost:3000/src/main.tsx');
+                if (mainResponse.ok) {
+                    addResult('Main Module', true, 'main.tsx loads successfully');
+                } else {
+                    addResult('Main Module', false, 'Cannot load main.tsx');
+                }
+            } catch (e) {
+                addResult('Main Module', false, e.message);
+            }
+
+            // Test 5: Check if React loads
+            try {
+                const reactResponse = await fetch('http://localhost:3000/node_modules/.vite/deps/react.js');
+                if (reactResponse.ok) {
+                    addResult('React Library', true, 'React loads successfully');
+                } else {
+                    addResult('React Library', false, 'Cannot load React');
+                }
+            } catch (e) {
+                addResult('React Library', false, e.message);
+            }
+
+            // Test 6: Check Bluetooth support
+            if ('bluetooth' in navigator) {
+                addResult('Bluetooth Support', true, 'Web Bluetooth API is available (printer will work)');
+            } else {
+                addResult('Bluetooth Support', false, 'Bluetooth not supported (use Chrome or Edge for printer)');
+            }
+
+            // Test 7: Service Worker support
+            if ('serviceWorker' in navigator) {
+                addResult('Service Worker', true, 'Service Worker supported (PWA will work)');
+            } else {
+                addResult('Service Worker', false, 'Service Worker not supported');
+            }
+
+            status.innerHTML = '<div class="status success">✅ Diagnostics complete!</div>';
+        }
+
+        async function testIndexedDB() {
+            try {
+                const request = indexedDB.open('TestDB', 1);
+                request.onsuccess = function(event) {
+                    addResult('IndexedDB Test', true, 'Successfully created test database');
+                    const db = event.target.result;
+                    db.close();
+                    indexedDB.deleteDatabase('TestDB');
+                };
+                request.onerror = function() {
+                    addResult('IndexedDB Test', false, 'Failed to create database');
+                };
+            } catch (e) {
+                addResult('IndexedDB Test', false, e.message);
+            }
+        }
+
+        // Auto-run on page load
+        window.addEventListener('load', runDiagnostics);
+    </script>
+</body>
+</html>
