@@ -153,11 +153,14 @@ const QuickSale = () => {
         });
       }
 
-      // Add cash transaction
+      // Add cash transaction - record the SALE amount (revenue), not cash tendered
+      // For cash payments: record total sale amount as revenue
+      // For mixed payments: record the cash portion of the sale
       if (paymentMethod === 'cash' || paymentMethod === 'mixed') {
+        const cashRevenue = paymentMethod === 'cash' ? total : cashPaid;
         await db.cashTransactions.add({
           type: 'sale',
-          amount: cashPaid,
+          amount: cashRevenue,
           saleId,
           userId: currentUser?.id,
           createdAt: new Date(),
