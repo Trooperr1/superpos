@@ -11,6 +11,9 @@ import {
   BanknotesIcon,
   CreditCardIcon,
 } from '@heroicons/react/24/outline';
+import NumberPad from '../components/NumberPad';
+
+const QUICK_AMOUNTS = [5000, 10000, 25000, 50000, 100000];
 
 const QuickSale = () => {
   const [products, setProducts] = useState<Product[]>([]);
@@ -21,6 +24,7 @@ const QuickSale = () => {
   const [paymentMethod, setPaymentMethod] = useState<'cash' | 'card' | 'mixed'>('cash');
   const [cashAmount, setCashAmount] = useState('');
   const [cardAmount, setCardAmount] = useState('');
+  const [activeInput, setActiveInput] = useState<'cash' | 'card'>('cash');
 
   const cart = useCartStore();
   const { currentUser } = useAuthStore();
@@ -176,10 +180,32 @@ const QuickSale = () => {
     }
   };
 
+  const handleQuickAmount = (amount: number) => {
+    if (activeInput === 'cash') {
+      setCashAmount(amount.toString());
+    } else {
+      setCardAmount(amount.toString());
+    }
+  };
+
+  const handleNumberPadChange = (value: string) => {
+    if (activeInput === 'cash') {
+      setCashAmount(value);
+    } else {
+      setCardAmount(value);
+    }
+  };
+
   const subtotal = cart.getSubtotal();
   const discountAmount = cart.getDiscountAmount();
   const tax = cart.getTax(taxRate);
   const total = cart.getTotal(taxRate);
+
+  const currentInputValue = activeInput === 'cash' ? cashAmount : cardAmount;
+  const totalPaid = (parseFloat(cashAmount) || 0) + (parseFloat(cardAmount) || 0);
+  const changeAmount = paymentMethod === 'cash' && parseFloat(cashAmount) >= total
+    ? parseFloat(cashAmount) - total
+    : 0;
 
   return (
     <div className="flex h-full gap-4" dir="rtl">
@@ -368,7 +394,7 @@ const QuickSale = () => {
       {/* Payment Modal */}
       {showPaymentModal && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
-          <div className="w-full max-w-md rounded-lg bg-white p-6" dir="rtl">
+          <div className="w-full max-w-2xl rounded-lg bg-white p-6" dir="rtl">
             <div className="mb-4 flex items-center justify-between">
               <h3 className="text-xl font-bold text-gray-800 kurdish-text">
                 {t('sale.paymentMethod')}
@@ -384,7 +410,7 @@ const QuickSale = () => {
             {/* Payment Method Selection */}
             <div className="mb-4 grid grid-cols-3 gap-2">
               <button
-                onClick={() => setPaymentMethod('cash')}
+                onClick={() => { setPaymentMethod('cash'); setActiveInput('cash'); }}
                 className={`rounded-lg border-2 py-3 font-medium transition-all touch-button kurdish-text ${
                   paymentMethod === 'cash'
                     ? 'border-emerald-600 bg-emerald-50 text-emerald-600'
@@ -406,7 +432,7 @@ const QuickSale = () => {
                 {t('sale.card')}
               </button>
               <button
-                onClick={() => setPaymentMethod('mixed')}
+                onClick={() => { setPaymentMethod('mixed'); setActiveInput('cash'); }}
                 className={`rounded-lg border-2 py-3 font-medium transition-all touch-button kurdish-text ${
                   paymentMethod === 'mixed'
                     ? 'border-emerald-600 bg-emerald-50 text-emerald-600'
@@ -417,60 +443,118 @@ const QuickSale = () => {
               </button>
             </div>
 
-            {/* Amount Inputs */}
-            <div className="mb-4 space-y-3">
-              <div className="rounded-lg bg-gray-50 p-3">
-                <p className="text-sm text-gray-600 kurdish-text">{t('common.total')}</p>
-                <p className="text-2xl font-bold text-emerald-600">{formatCurrency(total)}</p>
+            {/* Main Content Grid */}
+            <div className="grid grid-cols-2 gap-4">
+              {/* Left Side - Input Display */}
+              <div className="space-y-3">
+                <div className="rounded-lg bg-gray-50 p-3">
+                  <p className="text-sm text-gray-600 kurdish-text">{t('common.total')}</p>
+                  <p className="text-2xl font-bold text-emerald-600">{formatCurrency(total)}</p>
+                </div>
+
+                {(paymentMethod === 'cash' || paymentMethod === 'mixed') && (
+                  <button
+                    onClick={() => setActiveInput('cash')}
+                    className={`w-full rounded-lg border-2 p-3 text-right transition-all touch-button ${
+                      activeInput === 'cash'
+                        ? 'border-emerald-600 bg-emerald-50'
+                        : 'border-gray-300'
+                    }`}
+                  >
+                    <label className="block text-sm font-medium text-gray-700 kurdish-text mb-1">
+                      <BanknotesIcon className="inline h-4 w-4 ml-1" />
+                      {t('sale.amountPaid')} ({t('sale.cash')})
+                    </label>
+                    <p className="text-xl font-bold">{cashAmount || '0'}</p>
+                  </button>
+                )}
+
+                {paymentMethod === 'mixed' && (
+                  <button
+                    onClick={() => setActiveInput('card')}
+                    className={`w-full rounded-lg border-2 p-3 text-right transition-all touch-button ${
+                      activeInput === 'card'
+                        ? 'border-emerald-600 bg-emerald-50'
+                        : 'border-gray-300'
+                    }`}
+                  >
+                    <label className="block text-sm font-medium text-gray-700 kurdish-text mb-1">
+                      <CreditCardIcon className="inline h-4 w-4 ml-1" />
+                      {t('sale.amountPaid')} ({t('sale.card')})
+                    </label>
+                    <p className="text-xl font-bold">{cardAmount || '0'}</p>
+                  </button>
+                )}
+
+                {paymentMethod === 'mixed' && (
+                  <div className="rounded-lg bg-blue-50 p-3">
+                    <p className="text-sm text-gray-600 kurdish-text">کۆی پارەی دراو</p>
+                    <p className={`text-xl font-bold ${totalPaid >= total ? 'text-emerald-600' : 'text-red-600'}`}>
+                      {formatCurrency(totalPaid)}
+                    </p>
+                  </div>
+                )}
+
+                {changeAmount > 0 && (
+                  <div className="rounded-lg bg-emerald-50 p-3">
+                    <p className="text-sm text-gray-600 kurdish-text">{t('sale.change')}</p>
+                    <p className="text-xl font-bold text-emerald-600">
+                      {formatCurrency(changeAmount)}
+                    </p>
+                  </div>
+                )}
+
+                {/* Confirm Button */}
+                <button
+                  onClick={handleCompleteSale}
+                  className="w-full rounded-lg bg-emerald-600 py-3 font-semibold text-white hover:bg-emerald-700 touch-button kurdish-text"
+                >
+                  {t('sale.completeSale')}
+                </button>
               </div>
 
+              {/* Right Side - Number Pad (only for cash/mixed) */}
               {(paymentMethod === 'cash' || paymentMethod === 'mixed') && (
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 kurdish-text mb-1">
-                    {t('sale.amountPaid')} ({t('sale.cash')})
-                  </label>
-                  <input
-                    type="number"
-                    value={cashAmount}
-                    onChange={(e) => setCashAmount(e.target.value)}
-                    placeholder="0"
-                    className="w-full rounded-lg border-2 border-gray-300 py-2 px-4 text-lg focus:border-emerald-500 focus:outline-none"
+                <div className="space-y-3">
+                  {/* Quick Amount Buttons */}
+                  <div className="grid grid-cols-3 gap-2">
+                    {QUICK_AMOUNTS.map((amount) => (
+                      <button
+                        key={amount}
+                        onClick={() => handleQuickAmount(amount)}
+                        className="rounded-lg border-2 border-gray-300 bg-white py-2 font-medium text-gray-800 hover:bg-gray-100 touch-button text-sm"
+                      >
+                        {formatCurrency(amount)}
+                      </button>
+                    ))}
+                    <button
+                      onClick={() => handleQuickAmount(total)}
+                      className="rounded-lg border-2 border-emerald-500 bg-emerald-50 py-2 font-medium text-emerald-600 hover:bg-emerald-100 touch-button text-sm kurdish-text"
+                    >
+                      تەواو
+                    </button>
+                  </div>
+
+                  {/* Number Pad */}
+                  <NumberPad
+                    value={currentInputValue}
+                    onChange={handleNumberPadChange}
+                    showDecimal={false}
                   />
                 </div>
               )}
 
-              {paymentMethod === 'mixed' && (
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 kurdish-text mb-1">
-                    {t('sale.amountPaid')} ({t('sale.card')})
-                  </label>
-                  <input
-                    type="number"
-                    value={cardAmount}
-                    onChange={(e) => setCardAmount(e.target.value)}
-                    placeholder="0"
-                    className="w-full rounded-lg border-2 border-gray-300 py-2 px-4 text-lg focus:border-emerald-500 focus:outline-none"
-                  />
-                </div>
-              )}
-
-              {paymentMethod === 'cash' && cashAmount && parseFloat(cashAmount) >= total && (
-                <div className="rounded-lg bg-emerald-50 p-3">
-                  <p className="text-sm text-gray-600 kurdish-text">{t('sale.change')}</p>
-                  <p className="text-xl font-bold text-emerald-600">
-                    {formatCurrency(parseFloat(cashAmount) - total)}
-                  </p>
+              {/* Card-only message */}
+              {paymentMethod === 'card' && (
+                <div className="flex items-center justify-center rounded-lg bg-gray-50 p-8">
+                  <div className="text-center">
+                    <CreditCardIcon className="mx-auto h-16 w-16 text-gray-400 mb-4" />
+                    <p className="text-gray-600 kurdish-text">پارەدان بە کارت</p>
+                    <p className="text-2xl font-bold text-emerald-600 mt-2">{formatCurrency(total)}</p>
+                  </div>
                 </div>
               )}
             </div>
-
-            {/* Confirm Button */}
-            <button
-              onClick={handleCompleteSale}
-              className="w-full rounded-lg bg-emerald-600 py-3 font-semibold text-white hover:bg-emerald-700 touch-button kurdish-text"
-            >
-              {t('sale.completeSale')}
-            </button>
           </div>
         </div>
       )}
