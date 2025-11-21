@@ -26,7 +26,7 @@ export interface Sale {
   discountType: 'percentage' | 'fixed';
   tax: number;
   total: number;
-  paymentMethod: 'cash' | 'card' | 'mixed';
+  paymentMethod: 'cash' | 'card' | 'mixed' | 'credit';
   cashAmount?: number;
   cardAmount?: number;
   changeGiven?: number;

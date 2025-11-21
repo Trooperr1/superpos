@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
-import { db, type Product, generateTransactionId } from '../db/database';
+import { db, type Product, type Customer, generateTransactionId } from '../db/database';
 import { useCartStore, useAuthStore, useSettingsStore, useUIStore } from '../store/useStore';
 import { t, formatCurrency } from '../i18n/translations';
 import {
@@ -10,6 +10,8 @@ import {
   XMarkIcon,
   BanknotesIcon,
   CreditCardIcon,
+  UserIcon,
+  ClockIcon,
 } from '@heroicons/react/24/outline';
 import NumberPad from '../components/NumberPad';
 
@@ -23,11 +25,20 @@ const QuickSale = () => {
   const [filteredProducts, setFilteredProducts] = useState<Product[]>([]);
   const [quickProducts, setQuickProducts] = useState<Product[]>([]);
   const [showPaymentModal, setShowPaymentModal] = useState(false);
-  const [paymentMethod, setPaymentMethod] = useState<'cash' | 'card' | 'mixed'>('cash');
+  const [paymentMethod, setPaymentMethod] = useState<'cash' | 'card' | 'mixed' | 'credit'>('cash');
   const [cashAmount, setCashAmount] = useState('');
   const [cardAmount, setCardAmount] = useState('');
   const [activeInput, setActiveInput] = useState<'cash' | 'card'>('cash');
   const [scannerFlash, setScannerFlash] = useState(false);
+
+  // Credit/Debt customer selection
+  const [customers, setCustomers] = useState<Customer[]>([]);
+  const [customerSearchQuery, setCustomerSearchQuery] = useState('');
+  const [filteredCustomers, setFilteredCustomers] = useState<Customer[]>([]);
+  const [selectedCustomer, setSelectedCustomer] = useState<Customer | null>(null);
+  const [showNewCustomerForm, setShowNewCustomerForm] = useState(false);
+  const [newCustomerName, setNewCustomerName] = useState('');
+  const [newCustomerPhone, setNewCustomerPhone] = useState('');
 
   // Barcode scanner refs
   const scanBufferRef = useRef('');
@@ -43,7 +54,33 @@ const QuickSale = () => {
 
   useEffect(() => {
     loadProducts();
+    loadCustomers();
   }, []);
+
+  // Load customers for credit sales
+  const loadCustomers = async () => {
+    try {
+      const allCustomers = await db.customers.toArray();
+      setCustomers(allCustomers);
+    } catch (error) {
+      console.error('Failed to load customers:', error);
+    }
+  };
+
+  // Filter customers based on search
+  useEffect(() => {
+    if (customerSearchQuery.trim()) {
+      const query = customerSearchQuery.toLowerCase();
+      const filtered = customers.filter(
+        (c) =>
+          c.name.toLowerCase().includes(query) ||
+          c.phone?.toLowerCase().includes(query)
+      );
+      setFilteredCustomers(filtered.slice(0, 5));
+    } else {
+      setFilteredCustomers([]);
+    }
+  }, [customerSearchQuery, customers]);
 
   useEffect(() => {
     // Filter products based on search
@@ -197,6 +234,39 @@ const QuickSale = () => {
     setShowPaymentModal(true);
   };
 
+  // Create new customer on the spot for credit sale
+  const handleCreateCustomer = async () => {
+    if (!newCustomerName.trim()) {
+      showNotification('error', 'ناوی کڕیار پێویستە');
+      return;
+    }
+
+    try {
+      const customerId = await db.customers.add({
+        name: newCustomerName,
+        phone: newCustomerPhone || undefined,
+        totalPurchases: 0,
+        totalSpent: 0,
+        credit: 0,
+        loyaltyPoints: 0,
+        createdAt: new Date(),
+      });
+
+      const newCustomer = await db.customers.get(customerId);
+      if (newCustomer) {
+        setSelectedCustomer(newCustomer);
+        setShowNewCustomerForm(false);
+        setNewCustomerName('');
+        setNewCustomerPhone('');
+        loadCustomers();
+        showNotification('success', 'کڕیار زیادکرا');
+      }
+    } catch (error) {
+      console.error('Failed to create customer:', error);
+      showNotification('error', t('errors.unknownError'));
+    }
+  };
+
   const handleCompleteSale = async () => {
     try {
       const subtotal = cart.getSubtotal();
@@ -206,7 +276,13 @@ const QuickSale = () => {
       let cashPaid = 0;
       let cardPaid = 0;
 
-      if (paymentMethod === 'cash') {
+      // Validate credit sale has customer selected
+      if (paymentMethod === 'credit') {
+        if (!selectedCustomer) {
+          showNotification('error', 'تکایە کڕیارێک هەڵبژێرە بۆ قەرز');
+          return;
+        }
+      } else if (paymentMethod === 'cash') {
         cashPaid = parseFloat(cashAmount) || 0;
         if (cashPaid < total) {
           showNotification('error', 'بڕی پارەی دراو کەمە');
@@ -244,6 +320,7 @@ const QuickSale = () => {
         cashAmount: cashPaid || undefined,
         cardAmount: cardPaid || undefined,
         changeGiven: changeGiven > 0 ? changeGiven : undefined,
+        customerId: selectedCustomer?.id,
         userId: currentUser?.id,
         createdAt: new Date(),
       });
@@ -256,30 +333,43 @@ const QuickSale = () => {
         });
       }
 
-      // Add cash transaction - record the SALE amount (revenue), not cash tendered
-      // For cash payments: record total sale amount as revenue
-      // For mixed payments: record the cash portion of the sale
-      if (paymentMethod === 'cash' || paymentMethod === 'mixed') {
-        const cashRevenue = paymentMethod === 'cash' ? total : cashPaid;
-        await db.cashTransactions.add({
-          type: 'sale',
-          amount: cashRevenue,
-          saleId,
-          userId: currentUser?.id,
-          createdAt: new Date(),
+      // Handle credit sale - add to customer's debt
+      if (paymentMethod === 'credit' && selectedCustomer) {
+        await db.customers.update(selectedCustomer.id!, {
+          credit: selectedCustomer.credit + total,
+          totalPurchases: selectedCustomer.totalPurchases + 1,
+          totalSpent: selectedCustomer.totalSpent + total,
+          lastVisit: new Date(),
         });
+        showNotification('success', `قەرز زیادکرا - ${formatCurrency(total)} بۆ ${selectedCustomer.name}`);
+      } else {
+        // Add cash transaction - record the SALE amount (revenue), not cash tendered
+        // For cash payments: record total sale amount as revenue
+        // For mixed payments: record the cash portion of the sale
+        if (paymentMethod === 'cash' || paymentMethod === 'mixed') {
+          const cashRevenue = paymentMethod === 'cash' ? total : cashPaid;
+          await db.cashTransactions.add({
+            type: 'sale',
+            amount: cashRevenue,
+            saleId,
+            userId: currentUser?.id,
+            createdAt: new Date(),
+          });
+        }
+        showNotification('success', t('success.saleCompleted'));
       }
-
-      showNotification('success', t('success.saleCompleted'));
 
       // Clear cart and close modal
       cart.clearCart();
       setShowPaymentModal(false);
       setCashAmount('');
       setCardAmount('');
+      setSelectedCustomer(null);
+      setCustomerSearchQuery('');
 
       // Reload products to update stock
       loadProducts();
+      loadCustomers();
     } catch (error) {
       console.error('Failed to complete sale:', error);
       showNotification('error', t('errors.unknownError'));
@@ -526,38 +616,49 @@ const QuickSale = () => {
             </div>
 
             {/* Payment Method Selection */}
-            <div className="mb-4 grid grid-cols-3 gap-2">
+            <div className="mb-4 grid grid-cols-4 gap-2">
               <button
                 onClick={() => { setPaymentMethod('cash'); setActiveInput('cash'); }}
-                className={`rounded-lg border-2 py-3 font-medium transition-all touch-button kurdish-text ${
+                className={`rounded-lg border-2 py-2 font-medium transition-all touch-button kurdish-text text-sm ${
                   paymentMethod === 'cash'
                     ? 'border-emerald-600 bg-emerald-50 text-emerald-600'
                     : 'border-gray-300 text-gray-600'
                 }`}
               >
-                <BanknotesIcon className="mx-auto h-6 w-6 mb-1" />
+                <BanknotesIcon className="mx-auto h-5 w-5 mb-1" />
                 {t('sale.cash')}
               </button>
               <button
                 onClick={() => setPaymentMethod('card')}
-                className={`rounded-lg border-2 py-3 font-medium transition-all touch-button kurdish-text ${
+                className={`rounded-lg border-2 py-2 font-medium transition-all touch-button kurdish-text text-sm ${
                   paymentMethod === 'card'
                     ? 'border-emerald-600 bg-emerald-50 text-emerald-600'
                     : 'border-gray-300 text-gray-600'
                 }`}
               >
-                <CreditCardIcon className="mx-auto h-6 w-6 mb-1" />
+                <CreditCardIcon className="mx-auto h-5 w-5 mb-1" />
                 {t('sale.card')}
               </button>
               <button
                 onClick={() => { setPaymentMethod('mixed'); setActiveInput('cash'); }}
-                className={`rounded-lg border-2 py-3 font-medium transition-all touch-button kurdish-text ${
+                className={`rounded-lg border-2 py-2 font-medium transition-all touch-button kurdish-text text-sm ${
                   paymentMethod === 'mixed'
                     ? 'border-emerald-600 bg-emerald-50 text-emerald-600'
                     : 'border-gray-300 text-gray-600'
                 }`}
               >
                 {t('sale.mixed')}
+              </button>
+              <button
+                onClick={() => setPaymentMethod('credit')}
+                className={`rounded-lg border-2 py-2 font-medium transition-all touch-button kurdish-text text-sm ${
+                  paymentMethod === 'credit'
+                    ? 'border-orange-600 bg-orange-50 text-orange-600'
+                    : 'border-gray-300 text-gray-600'
+                }`}
+              >
+                <ClockIcon className="mx-auto h-5 w-5 mb-1" />
+                قەرز
               </button>
             </div>
 
@@ -670,6 +771,148 @@ const QuickSale = () => {
                     <p className="text-gray-600 kurdish-text">پارەدان بە کارت</p>
                     <p className="text-2xl font-bold text-emerald-600 mt-2">{formatCurrency(total)}</p>
                   </div>
+                </div>
+              )}
+
+              {/* Credit/Debt - Customer Selection */}
+              {paymentMethod === 'credit' && (
+                <div className="space-y-3">
+                  <div className="rounded-lg bg-orange-50 p-3 border-2 border-orange-200">
+                    <p className="text-sm text-orange-700 kurdish-text font-medium">
+                      <ClockIcon className="inline h-4 w-4 ml-1" />
+                      فرۆشتن بە قەرز - پێویستە کڕیارێک هەڵبژێریت
+                    </p>
+                  </div>
+
+                  {/* Selected Customer Display */}
+                  {selectedCustomer ? (
+                    <div className="rounded-lg border-2 border-emerald-500 bg-emerald-50 p-3">
+                      <div className="flex items-center justify-between">
+                        <div className="flex items-center gap-2">
+                          <UserIcon className="h-8 w-8 text-emerald-600" />
+                          <div>
+                            <p className="font-semibold text-gray-800 kurdish-text">{selectedCustomer.name}</p>
+                            {selectedCustomer.phone && (
+                              <p className="text-sm text-gray-500">{selectedCustomer.phone}</p>
+                            )}
+                          </div>
+                        </div>
+                        <button
+                          onClick={() => setSelectedCustomer(null)}
+                          className="text-gray-400 hover:text-gray-600 touch-button"
+                        >
+                          <XMarkIcon className="h-5 w-5" />
+                        </button>
+                      </div>
+                      {selectedCustomer.credit > 0 && (
+                        <p className="mt-2 text-sm text-red-600 kurdish-text">
+                          قەرزی ئێستا: {formatCurrency(selectedCustomer.credit)}
+                        </p>
+                      )}
+                    </div>
+                  ) : (
+                    <>
+                      {/* Customer Search */}
+                      {!showNewCustomerForm ? (
+                        <div className="space-y-2">
+                          <div className="relative">
+                            <input
+                              type="text"
+                              value={customerSearchQuery}
+                              onChange={(e) => setCustomerSearchQuery(e.target.value)}
+                              placeholder="گەڕان بۆ کڕیار (ناو یان ژمارە)"
+                              className="w-full rounded-lg border-2 border-gray-300 py-2 pr-10 pl-3 focus:border-emerald-500 focus:outline-none kurdish-text"
+                            />
+                            <MagnifyingGlassIcon className="absolute right-3 top-1/2 h-5 w-5 -translate-y-1/2 text-gray-400" />
+                          </div>
+
+                          {/* Customer Search Results */}
+                          {filteredCustomers.length > 0 && (
+                            <div className="max-h-40 overflow-auto rounded-lg border border-gray-200 bg-white">
+                              {filteredCustomers.map((customer) => (
+                                <button
+                                  key={customer.id}
+                                  onClick={() => {
+                                    setSelectedCustomer(customer);
+                                    setCustomerSearchQuery('');
+                                  }}
+                                  className="flex w-full items-center gap-2 border-b border-gray-100 p-2 text-right hover:bg-emerald-50 touch-button"
+                                >
+                                  <UserIcon className="h-5 w-5 text-gray-400" />
+                                  <div className="flex-1">
+                                    <p className="font-medium text-gray-800 kurdish-text">{customer.name}</p>
+                                    {customer.phone && <p className="text-xs text-gray-500">{customer.phone}</p>}
+                                  </div>
+                                  {customer.credit > 0 && (
+                                    <span className="rounded bg-red-100 px-2 py-0.5 text-xs text-red-600">
+                                      {formatCurrency(customer.credit)}
+                                    </span>
+                                  )}
+                                </button>
+                              ))}
+                            </div>
+                          )}
+
+                          {/* Create New Customer Button */}
+                          <button
+                            onClick={() => setShowNewCustomerForm(true)}
+                            className="w-full rounded-lg border-2 border-dashed border-gray-300 py-3 text-gray-600 hover:border-emerald-500 hover:text-emerald-600 touch-button kurdish-text"
+                          >
+                            <PlusIcon className="inline h-5 w-5 ml-1" />
+                            کڕیاری نوێ زیادبکە
+                          </button>
+                        </div>
+                      ) : (
+                        /* New Customer Form */
+                        <div className="space-y-3 rounded-lg border-2 border-gray-200 p-3">
+                          <p className="font-medium text-gray-700 kurdish-text">کڕیاری نوێ</p>
+                          <input
+                            type="text"
+                            value={newCustomerName}
+                            onChange={(e) => setNewCustomerName(e.target.value)}
+                            placeholder="ناوی کڕیار *"
+                            className="w-full rounded-lg border-2 border-gray-300 py-2 px-3 focus:border-emerald-500 focus:outline-none kurdish-text"
+                          />
+                          <input
+                            type="tel"
+                            value={newCustomerPhone}
+                            onChange={(e) => setNewCustomerPhone(e.target.value)}
+                            placeholder="ژمارەی مۆبایل (ئارەزوومەندانە)"
+                            className="w-full rounded-lg border-2 border-gray-300 py-2 px-3 focus:border-emerald-500 focus:outline-none"
+                          />
+                          <div className="flex gap-2">
+                            <button
+                              onClick={handleCreateCustomer}
+                              className="flex-1 rounded-lg bg-emerald-600 py-2 text-white hover:bg-emerald-700 touch-button kurdish-text"
+                            >
+                              زیادکردن
+                            </button>
+                            <button
+                              onClick={() => {
+                                setShowNewCustomerForm(false);
+                                setNewCustomerName('');
+                                setNewCustomerPhone('');
+                              }}
+                              className="flex-1 rounded-lg border-2 border-gray-300 py-2 text-gray-600 hover:bg-gray-50 touch-button kurdish-text"
+                            >
+                              پاشگەزبوونەوە
+                            </button>
+                          </div>
+                        </div>
+                      )}
+                    </>
+                  )}
+
+                  {/* Credit Sale Summary */}
+                  {selectedCustomer && (
+                    <div className="rounded-lg bg-orange-100 p-3 text-center">
+                      <p className="text-sm text-orange-700 kurdish-text">قەرزی نوێ</p>
+                      <p className="text-2xl font-bold text-orange-700">{formatCurrency(total)}</p>
+                      <p className="text-xs text-orange-600 kurdish-text mt-1">
+                        کۆی قەرز دوای فرۆشتن: {formatCurrency(selectedCustomer.credit + total)}
+                      </p>
+                    </div>
+                  )}
                 </div>
               )}
             </div>
