@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef, useCallback } from 'react';
 import { db, type Product, generateTransactionId } from '../db/database';
 import { useCartStore, useAuthStore, useSettingsStore, useUIStore } from '../store/useStore';
 import { t, formatCurrency } from '../i18n/translations';
@@ -14,6 +14,8 @@ import {
 import NumberPad from '../components/NumberPad';
 
 const QUICK_AMOUNTS = [5000, 10000, 25000, 50000, 100000];
+const SCAN_TIMEOUT = 100; // Max ms between keystrokes for barcode scan
+const MIN_BARCODE_LENGTH = 4; // Minimum barcode length
 
 const QuickSale = () => {
   const [products, setProducts] = useState<Product[]>([]);
@@ -25,6 +27,12 @@ const QuickSale = () => {
   const [cashAmount, setCashAmount] = useState('');
   const [cardAmount, setCardAmount] = useState('');
   const [activeInput, setActiveInput] = useState<'cash' | 'card'>('cash');
+  const [scannerFlash, setScannerFlash] = useState(false);
+
+  // Barcode scanner refs
+  const scanBufferRef = useRef('');
+  const lastKeyTimeRef = useRef(0);
+  const scanTimeoutRef = useRef<NodeJS.Timeout | null>(null);
 
   const cart = useCartStore();
   const { currentUser } = useAuthStore();
@@ -52,6 +60,101 @@ const QuickSale = () => {
       setFilteredProducts([]);
     }
   }, [searchQuery, products]);
+
+  // Process scanned barcode
+  const processBarcode = useCallback(async (barcode: string) => {
+    if (barcode.length < MIN_BARCODE_LENGTH) return;
+
+    try {
+      const product = await db.products.where('barcode').equals(barcode).first();
+
+      if (product) {
+        if (product.stock <= 0) {
+          showNotification('error', t('sale.outOfStock'));
+          return;
+        }
+
+        // Visual feedback - flash
+        setScannerFlash(true);
+        setTimeout(() => setScannerFlash(false), 300);
+
+        // Audio feedback - beep
+        try {
+          const audioContext = new (window.AudioContext || (window as typeof window & { webkitAudioContext: typeof AudioContext }).webkitAudioContext)();
+          const oscillator = audioContext.createOscillator();
+          const gainNode = audioContext.createGain();
+          oscillator.connect(gainNode);
+          gainNode.connect(audioContext.destination);
+          oscillator.frequency.value = 1200;
+          oscillator.type = 'sine';
+          gainNode.gain.value = 0.3;
+          oscillator.start();
+          setTimeout(() => oscillator.stop(), 100);
+        } catch {
+          // Audio not supported, ignore
+        }
+
+        cart.addItem(product, 1);
+        setSearchQuery('');
+        setFilteredProducts([]);
+      } else {
+        showNotification('error', 'بارکۆد نەدۆزرایەوە');
+      }
+    } catch (error) {
+      console.error('Barcode scan error:', error);
+      showNotification('error', 'هەڵە لە خوێندنەوەی بارکۆد');
+    }
+  }, [cart, showNotification]);
+
+  // Barcode scanner keyboard listener
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      // Don't process if payment modal is open
+      if (showPaymentModal) return;
+
+      const now = Date.now();
+      const timeSinceLastKey = now - lastKeyTimeRef.current;
+
+      // If Enter key - process the buffer
+      if (e.key === 'Enter') {
+        if (scanBufferRef.current.length >= MIN_BARCODE_LENGTH) {
+          e.preventDefault();
+          processBarcode(scanBufferRef.current);
+        }
+        scanBufferRef.current = '';
+        return;
+      }
+
+      // Only accept alphanumeric characters for barcode
+      if (e.key.length === 1 && /^[a-zA-Z0-9]$/.test(e.key)) {
+        // If too much time passed, this is likely manual typing - reset buffer
+        if (timeSinceLastKey > SCAN_TIMEOUT && scanBufferRef.current.length > 0) {
+          scanBufferRef.current = '';
+        }
+
+        scanBufferRef.current += e.key;
+        lastKeyTimeRef.current = now;
+
+        // Clear any existing timeout
+        if (scanTimeoutRef.current) {
+          clearTimeout(scanTimeoutRef.current);
+        }
+
+        // Set timeout to clear buffer if no more keys
+        scanTimeoutRef.current = setTimeout(() => {
+          scanBufferRef.current = '';
+        }, SCAN_TIMEOUT * 3);
+      }
+    };
+
+    window.addEventListener('keydown', handleKeyDown);
+    return () => {
+      window.removeEventListener('keydown', handleKeyDown);
+      if (scanTimeoutRef.current) {
+        clearTimeout(scanTimeoutRef.current);
+      }
+    };
+  }, [showPaymentModal, processBarcode]);
 
   const loadProducts = async () => {
     try {
@@ -212,6 +315,18 @@ const QuickSale = () => {
 
   return (
     <div className="flex h-full gap-4" dir="rtl">
+      {/* Scanner Ready Indicator */}
+      <div
+        className={`fixed top-4 left-4 z-40 flex items-center gap-2 rounded-lg px-3 py-2 text-sm font-medium transition-all ${
+          scannerFlash
+            ? 'bg-emerald-500 text-white scale-110'
+            : 'bg-emerald-100 text-emerald-700'
+        }`}
+      >
+        <span>{scannerFlash ? '✓' : '📷'}</span>
+        <span className="kurdish-text">{scannerFlash ? 'سکان کرا!' : 'سکانەر ئامادەیە'}</span>
+      </div>
+
       {/* Left Side - Products */}
       <div className="flex-1 flex flex-col space-y-4">
         {/* Search Bar */}
