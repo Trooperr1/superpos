@@ -301,7 +301,7 @@ const Customers = () => {
         </div>
       ) : activeTab === 'debts' ? (
         /* Debt List View */
-        <div className="space-y-3">
+        <div className="space-y-3 max-h-[60vh] overflow-auto">
           {filteredCustomers.map((customer) => (
             <div
               key={customer.id}
@@ -500,9 +500,9 @@ const Customers = () => {
       {/* Payment Modal */}
       {showPaymentModal && payingCustomer && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
-          <div className="w-full max-w-lg rounded-lg bg-white p-6" dir="rtl">
-            <div className="mb-4 flex items-center justify-between">
-              <h3 className="text-xl font-bold text-gray-800 kurdish-text">
+          <div className="w-full max-w-md max-h-[90vh] overflow-auto rounded-lg bg-white p-4" dir="rtl">
+            <div className="mb-3 flex items-center justify-between">
+              <h3 className="text-lg font-bold text-gray-800 kurdish-text">
                 تۆمارکردنی پارەدان
               </h3>
               <button
@@ -513,64 +513,52 @@ const Customers = () => {
               </button>
             </div>
 
-            {/* Customer Info */}
-            <div className="mb-4 rounded-lg bg-gray-50 p-3">
-              <div className="flex items-center gap-3">
-                <UserIcon className="h-10 w-10 text-gray-400" />
-                <div>
-                  <p className="font-semibold text-gray-800 kurdish-text">{payingCustomer.name}</p>
-                  {payingCustomer.phone && (
-                    <p className="text-sm text-gray-500">{payingCustomer.phone}</p>
-                  )}
+            {/* Customer Info + Current Debt */}
+            <div className="mb-3 rounded-lg bg-red-50 border border-red-200 p-3">
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-2">
+                  <UserIcon className="h-8 w-8 text-red-600" />
+                  <div>
+                    <p className="font-semibold text-gray-800 kurdish-text">{payingCustomer.name}</p>
+                    {payingCustomer.phone && <p className="text-xs text-gray-500">{payingCustomer.phone}</p>}
+                  </div>
+                </div>
+                <div className="text-left">
+                  <p className="text-xs text-red-600 kurdish-text">قەرزی ئێستا</p>
+                  <p className="text-xl font-bold text-red-700">{formatCurrency(payingCustomer.credit)}</p>
                 </div>
               </div>
             </div>
 
-            {/* Current Debt */}
-            <div className="mb-4 rounded-lg bg-red-50 border-2 border-red-200 p-4 text-center">
-              <p className="text-sm text-red-600 kurdish-text">قەرزی ئێستا</p>
-              <p className="text-3xl font-bold text-red-700">{formatCurrency(payingCustomer.credit)}</p>
-            </div>
-
             {/* Payment Method */}
-            <div className="mb-4 grid grid-cols-2 gap-2">
+            <div className="mb-3 grid grid-cols-2 gap-2">
               <button
                 onClick={() => setPaymentMethod('cash')}
-                className={`rounded-lg border-2 py-2 font-medium transition-all touch-button kurdish-text ${
+                className={`rounded-lg border-2 py-2 font-medium transition-all touch-button kurdish-text text-sm ${
                   paymentMethod === 'cash'
                     ? 'border-emerald-600 bg-emerald-50 text-emerald-600'
                     : 'border-gray-300 text-gray-600'
                 }`}
               >
-                <BanknotesIcon className="mx-auto h-5 w-5 mb-1" />
+                <BanknotesIcon className="mx-auto h-4 w-4 mb-1" />
                 کاش
               </button>
               <button
                 onClick={() => setPaymentMethod('card')}
-                className={`rounded-lg border-2 py-2 font-medium transition-all touch-button kurdish-text ${
+                className={`rounded-lg border-2 py-2 font-medium transition-all touch-button kurdish-text text-sm ${
                   paymentMethod === 'card'
                     ? 'border-emerald-600 bg-emerald-50 text-emerald-600'
                     : 'border-gray-300 text-gray-600'
                 }`}
               >
-                <CreditCardIcon className="mx-auto h-5 w-5 mb-1" />
+                <CreditCardIcon className="mx-auto h-4 w-4 mb-1" />
                 کارت
               </button>
             </div>
 
-            {/* Number Pad */}
-            <div className="mb-4">
-              <NumberPad
-                value={paymentAmount}
-                onChange={setPaymentAmount}
-                maxValue={payingCustomer.credit}
-                showDecimal={false}
-              />
-            </div>
-
-            {/* Quick Amounts */}
-            <div className="mb-4 grid grid-cols-4 gap-2">
-              {[5000, 10000, 25000, 50000].map((amount) => (
+            {/* Quick Amounts + Full Amount */}
+            <div className="mb-3 grid grid-cols-3 gap-2">
+              {[5000, 10000, 25000].map((amount) => (
                 <button
                   key={amount}
                   onClick={() => setPaymentAmount(Math.min(amount, payingCustomer.credit).toString())}
@@ -580,35 +568,32 @@ const Customers = () => {
                 </button>
               ))}
             </div>
-
-            {/* Pay Full Amount Button */}
             <button
               onClick={() => setPaymentAmount(payingCustomer.credit.toString())}
-              className="mb-4 w-full rounded-lg border-2 border-emerald-500 bg-emerald-50 py-2 font-medium text-emerald-600 hover:bg-emerald-100 touch-button kurdish-text"
+              className="mb-3 w-full rounded-lg border-2 border-emerald-500 bg-emerald-50 py-2 font-medium text-emerald-600 hover:bg-emerald-100 touch-button kurdish-text text-sm"
             >
-              پارەدانی هەموو قەرزەکە
+              پارەدانی هەموو قەرزەکە - {formatCurrency(payingCustomer.credit)}
             </button>
+
+            {/* Number Pad */}
+            <div className="mb-3">
+              <NumberPad
+                value={paymentAmount}
+                onChange={setPaymentAmount}
+                maxValue={payingCustomer.credit}
+                showDecimal={false}
+              />
+            </div>
 
             {/* Remaining after payment */}
             {paymentAmount && parseFloat(paymentAmount) > 0 && (
-              <div className="mb-4 rounded-lg bg-emerald-50 border border-emerald-200 p-3 text-center">
-                <p className="text-sm text-emerald-600 kurdish-text">ماوە دوای پارەدان</p>
-                <p className="text-xl font-bold text-emerald-700">
+              <div className="mb-3 rounded-lg bg-emerald-50 border border-emerald-200 p-2 text-center">
+                <p className="text-xs text-emerald-600 kurdish-text">ماوە دوای پارەدان</p>
+                <p className="text-lg font-bold text-emerald-700">
                   {formatCurrency(Math.max(0, payingCustomer.credit - (parseFloat(paymentAmount) || 0)))}
                 </p>
               </div>
             )}
-
-            {/* Notes */}
-            <div className="mb-4">
-              <input
-                type="text"
-                value={paymentNotes}
-                onChange={(e) => setPaymentNotes(e.target.value)}
-                placeholder="تێبینی (ئارەزوومەندانە)"
-                className="w-full rounded-lg border-2 border-gray-300 py-2 px-3 focus:border-emerald-500 focus:outline-none kurdish-text"
-              />
-            </div>
 
             {/* Confirm Button */}
             <button
