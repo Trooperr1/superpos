@@ -40,6 +40,10 @@ const QuickSale = () => {
   const [newCustomerName, setNewCustomerName] = useState('');
   const [newCustomerPhone, setNewCustomerPhone] = useState('');
 
+  // Quick quantity edit
+  const [editingQuantityItem, setEditingQuantityItem] = useState<number | null>(null);
+  const [editingQuantityValue, setEditingQuantityValue] = useState('');
+
   // Barcode scanner refs
   const scanBufferRef = useRef('');
   const lastKeyTimeRef = useRef(0);
@@ -224,6 +228,23 @@ const QuickSale = () => {
       return;
     }
     cart.updateQuantity(productId, newQuantity);
+  };
+
+  // Quick quantity edit - open modal
+  const handleOpenQuantityEdit = (productId: number, currentQty: number) => {
+    setEditingQuantityItem(productId);
+    setEditingQuantityValue(currentQty.toString());
+  };
+
+  // Quick quantity edit - confirm
+  const handleConfirmQuantityEdit = () => {
+    if (editingQuantityItem === null) return;
+    const newQty = parseInt(editingQuantityValue) || 0;
+    if (newQty > 0) {
+      handleUpdateQuantity(editingQuantityItem, newQty);
+    }
+    setEditingQuantityItem(null);
+    setEditingQuantityValue('');
   };
 
   const handleCheckout = () => {
@@ -538,7 +559,12 @@ const QuickSale = () => {
                       >
                         <MinusIcon className="h-4 w-4" />
                       </button>
-                      <span className="w-8 text-center font-medium">{item.quantity}</span>
+                      <button
+                        onClick={() => handleOpenQuantityEdit(item.productId, item.quantity)}
+                        className="w-10 text-center font-bold text-lg bg-blue-100 text-blue-700 rounded-lg py-1 hover:bg-blue-200 touch-button"
+                      >
+                        {item.quantity}
+                      </button>
                       <button
                         onClick={() => handleUpdateQuantity(item.productId, item.quantity + 1)}
                         className="flex h-8 w-8 items-center justify-center rounded-lg bg-gray-100 hover:bg-gray-200 touch-button"
@@ -916,6 +942,35 @@ const QuickSale = () => {
                 </div>
               )}
             </div>
+          </div>
+        </div>
+      )}
+
+      {/* Quick Quantity Edit Modal */}
+      {editingQuantityItem !== null && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
+          <div className="w-full max-w-xs rounded-lg bg-white p-4" dir="rtl">
+            <div className="mb-3 flex items-center justify-between">
+              <h3 className="text-lg font-bold text-gray-800 kurdish-text">ژمارە داخڵ بکە</h3>
+              <button
+                onClick={() => { setEditingQuantityItem(null); setEditingQuantityValue(''); }}
+                className="text-gray-600 hover:text-gray-800 touch-button"
+              >
+                <XMarkIcon className="h-6 w-6" />
+              </button>
+            </div>
+            <NumberPad
+              value={editingQuantityValue}
+              onChange={setEditingQuantityValue}
+              showDecimal={false}
+            />
+            <button
+              onClick={handleConfirmQuantityEdit}
+              disabled={!editingQuantityValue || parseInt(editingQuantityValue) <= 0}
+              className="mt-3 w-full rounded-lg bg-emerald-600 py-3 font-semibold text-white hover:bg-emerald-700 disabled:bg-gray-300 touch-button kurdish-text"
+            >
+              تەواو
+            </button>
           </div>
         </div>
       )}
